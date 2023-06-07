@@ -1,0 +1,36 @@
+FUNCTION "Check Setpoint Time" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      nh : Int;
+      "jml proses" : Int;
+   END_VAR
+
+   VAR_OUTPUT 
+      Ready : Bool;
+   END_VAR
+
+   VAR_TEMP 
+      "CNT_Jml Proses" : Int;
+   END_VAR
+
+
+BEGIN
+	//Mengecek apakah seluruh setpoint sudah tidak nol atau ada yang masih nol karena setpoint nilai minimalnya 1 (1 menit)
+	
+	FOR #"CNT_Jml Proses" := 1 TO #"jml proses" - 1 DO
+	    // Statement section FOR
+	    // Kalo ada yang nol langsung exit
+	    IF "Hanger Data".Hanger[#nh].Setpoint[#"CNT_Jml Proses"] = 0 THEN
+	        #Ready := FALSE;
+	        EXIT;
+	    END_IF;
+	    
+	    //kalo udah sampe counter nomor jml proses - 1 dan beliaupun setpoint nya tidak sama dengan nol
+	    IF #"CNT_Jml Proses" = (#"jml proses" - 1)
+	        AND "Hanger Data".Hanger[#nh].Setpoint[#"CNT_Jml Proses"] <> 0 THEN
+	        #Ready := TRUE;
+	    END_IF;
+	END_FOR;
+	
+END_FUNCTION
