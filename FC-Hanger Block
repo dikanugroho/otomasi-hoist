@@ -1,0 +1,237 @@
+FUNCTION "Hanger Block" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_IN_OUT 
+      FuncTag : "Hanger";
+   END_VAR
+
+   VAR_TEMP 
+      "CNT_Reset Crane" : Int;
+      "CNT_Reset Tank" : Int;
+      "counter" : Int;   // dipake di FOR loop waktu
+      "counter prediksi" : Int;   // dipake di FOR loop prediksi start stop
+      "counter overwrite" : Int;   // dipake di FOR loop overwrite prediksi
+      "counter time ready" : Int;   // dipake di FOR loop penentuan time ready
+      "dump output" : Bool;   // dipake di timer
+      "conv setpoint" : DInt;   // dipake di FOR loop prediksi start stop
+      "nomor proses_before" : Int;
+      "current time" : DInt;   // dipake untuk ambil waktu di overwrite
+      CNT_Time_Ready : Int;   // dipake ngecek HMI_Ready
+      "CNT_Nomor Proses" : Int;   // dipake ngecek spare waktu tiap proses
+      CNT_Nomor_Ready : Int;   // dipake ngecek readiness spare waktu tiap proses
+      CNT_Hanger : Int;   // ngeloop tiap hanger
+      NP_Ready : Array[0..6] of Bool;
+      "modifier pertama" : Int;
+      "modifier start" : Int;
+      "delt stop" : Int;
+      localtime : DInt;   // take local time
+      "counter reset" : DInt;
+   END_VAR
+
+
+BEGIN
+	//Cari routing berdasarkan input
+	IF #FuncTag.Divert = FALSE THEN //kalo lagi divert, jangan dirun
+	    "Routing Hanger"(homebase:= #FuncTag.Homebase,
+	                     proses := #FuncTag.Proses,
+	                     "nomor proses" := #FuncTag."Nomor Proses",
+	                     destination => #FuncTag.Destination,
+	                     "jml proses" => #FuncTag."Jml Proses",
+	                     "next destination" => #FuncTag."Next Destination");
+	END_IF;
+	
+	
+	REGION Cek Setpoint
+	    // Call Setpoint
+	    "Check Setpoint Time"(nh:=#FuncTag."Nomor Hanger",
+	                          "jml proses":=#FuncTag."Jml Proses",
+	                          Ready=>#FuncTag.Setpoint_Ready);
+	                       END_REGION
+	
+	REGION Algoritma Penentuan TIME_Ready dan CRANE_Ready
+	    //Call function untuk cek kesiapan waktu, hanya ketika HMI udah bilang Ready
+	    IF #FuncTag.HMI_Ready = TRUE AND (#FuncTag.Time_Ready = FALSE OR #FuncTag.Crane_Ready = FALSE) THEN //run code sampe ketemu waktu yang cocok buat di-run
+	        "Penjadwalan TANGKI"("nomor hanger" := #FuncTag."Nomor Hanger",
+	                             "jml proses" := #FuncTag."Jml Proses",
+	                             Ready => #FuncTag.Time_Ready,
+	                             FuncTag:=#FuncTag);
+	    END_IF;
+	    //Call function untuk hitung prediksi penggunaan crane dan bandingin sama hanger satunya
+	    IF #FuncTag.HMI_Ready = TRUE AND (#FuncTag.Crane_Ready = FALSE OR #FuncTag.Time_Ready = FALSE) THEN
+	        "Penjadwalan CRANE"(nh := #FuncTag."Nomor Hanger",
+	                            Ready => #FuncTag.Crane_Ready);
+	    END_IF;
+	    
+	    END_REGION
+	
+	
+	//Save nomor proses sebelum diangkat pada region Algoritma Penentuan READY
+	#"nomor proses_before" := #FuncTag."Nomor Proses";
+	
+	REGION Algoritma Penentuan READY
+	    //Mulai algoritma pencarian apakah hanger READY atau TIDAK
+	    
+	    //Cek apakah tangki next destination kosong.
+	    IF "Occupancy_DB".occupancy[#FuncTag."Next Destination"] = FALSE THEN
+	        #FuncTag.Occupancy_Ready := TRUE;
+	    ELSE
+	        #FuncTag.Occupancy_Ready := FALSE;
+	    END_IF;
+	    
+	    //Skenario 1: Hanger ready karena belum dimulai prosesnya/sedang di homebase
+	    //IF HMI pencet OK AND pos hanger = homebase AND tangki destinasi kosong, then READY = TRUE. Cek Destinasi Akhir di bawah
+	    //Ini juga mengakomodasi yang loncat gara2 diverted. Akan di-run setiap cycle. Yang ini hanya READY ketika ada tangki kosong.
+	    IF #FuncTag.Position = #FuncTag.Homebase THEN
+	        IF (#FuncTag.Time_Ready = TRUE AND #FuncTag.Crane_Ready = TRUE) //secara timing harus ok
+	            AND #FuncTag.Occupancy_Ready = TRUE THEN//next tank harus OK
+	            #FuncTag.Ready := TRUE;
+	        ELSE
+	            #FuncTag.Ready := FALSE;
+	        END_IF; //Loncat ke cek destinasi
+	    END_IF;
+	    
+	    //Skenario 2: Hanger telah berproses, kemudian waktu celup sudah selesai
+	    //Cek apakah waktu celup sudah selesai. Jika sudah selesai, pasti diangkut
+	    //Nilai timer celup ditambah waktu untuk bergerak turun sebagai offset. Yang pindah ga dipake soalnya waktunya dinamis tergantung jarak yang ditempuh
+	    IF #FuncTag.Position <> #FuncTag.Homebase AND (#FuncTag.Time_Ready = TRUE AND #FuncTag.Crane_Ready = TRUE) //secara timing harus ok
+	        AND #FuncTag.Occupancy_Ready = TRUE THEN
+	        //ditambah waktu untuk moving dan turun
+	        IF #FuncTag."Timer celup"[#FuncTag."Nomor Proses"] + ("Time Param"."Avg Moving" + "Time Param".Turun) > #FuncTag.Setpoint[#FuncTag."Nomor Proses"]  THEN
+	            #FuncTag.Ready := TRUE;
+	        ELSE
+	            #FuncTag.Ready := FALSE;
+	        END_IF; //Loncat ke cek destinasi
+	    END_IF;
+	    
+	    //Cek Destinasi final
+	    //Apakah diangkut ke tangki berikutnya atau ke hanger station. (Checker sebagai latch)
+	    //Pengecekan dilakukan ketika sudah diangkat. Ambil pake step 4 supaya yang timing jalan duluan
+	    IF "Positioning_DB"."hanger selected" = #FuncTag."Nomor Hanger" AND "Step Gerak"."Ambil step" = 4 AND #FuncTag.Checker_Ready = FALSE
+	        AND #FuncTag."Finish Process" = FALSE THEN //Kalo proses kelar yaudah gausah nambahin nomor proses
+	   
+	        //Skenario A: Tangki berikutnya Kosong. Tambah nomor proses.
+	        IF #FuncTag.Ready = TRUE AND #FuncTag.Occupancy_Ready = TRUE THEN
+	            #FuncTag."Nomor Proses" := #FuncTag."Nomor Proses" + 1;
+	            #FuncTag.Checker_Ready := TRUE;
+	            
+	            //Skenario B: Tangki berikutnya PENUH, loncat ke kode di paling bawah 
+	        ELSIF #FuncTag.Ready AND #FuncTag.Occupancy_Ready = FALSE THEN
+	            #FuncTag.Divert := TRUE;
+	            #FuncTag.Destination := #FuncTag.Homebase; //Pindahin dulu ke Homebase. Kalo proses divert selesai, cek di kode paling bawah
+	            #FuncTag.Checker_Ready := TRUE;
+	        END_IF;
+	    ELSE
+	        ; //do nothing
+	    END_IF;
+	    
+	
+	END_REGION
+	
+	
+	REGION Algoritma Timing
+	    IF #FuncTag.HMI_Ready = TRUE AND #FuncTag.Time_Ready = TRUE THEN
+	        //run timing
+	        // Start timer ke-n apabila sudah mulai gerak lepas dan gerak ambil. Setpoint akan diatur nanti, di input HMI
+	        // Waktu celup disimpan di ET
+	        
+	        // Start waktu celup jika dan hanya jika hanger tersebut selesai dilepas DAN bukan hasil divert. Rewrite waktu mulai.
+	        IF "Positioning_DB"."hanger selected" = #FuncTag."Nomor Hanger" AND "Step Gerak"."Lepas step" = 2 AND #FuncTag.Position <> #FuncTag.Homebase THEN
+	            #FuncTag.Timer_Start := TRUE;
+	            #FuncTag.Checker_Ready := FALSE;
+	           
+	        END_IF;
+	        
+	        //Stop waktu celup ketika hanger diangkat. Rewrite waktu selesai.
+	        IF ("Positioning_DB"."hanger selected" = #FuncTag."Nomor Hanger" AND "Step Gerak"."Ambil step" = 3) OR #FuncTag."Nomor Proses" = 0 THEN
+	            #FuncTag.Timer_Start := FALSE;
+	        END_IF;
+	        //Timer nya jalan ketika timer start true.
+	        #FuncTag."IEC Timer Proses"[#FuncTag."Nomor Proses"].TONR(IN := #FuncTag.Timer_Start, //Sesuai command di atas
+	                                                                  R := #FuncTag.Timer_Reset, //perlu diganti
+	                                                                  PT := T#999M, //biar ET gapernah mentok
+	                                                                  Q => #"dump output", //ga dipake
+	                                                                  ET => #FuncTag."Timer celup"[#FuncTag."Nomor Proses"]); //storage
+	    END_IF;
+	END_REGION
+	
+	REGION Algoritima Penentuan Posisi Hanger
+	    // Agar data Position pada DB selalu terupdate. Ikut berubah jika hanger selected oleh Positioning dan pemindahan sudah selesai
+	    IF "Positioning_DB"."hanger selected" = #FuncTag."Nomor Hanger" AND "Step Gerak"."Ambil step" = 4 THEN
+	        //Pakai destination, karena yang dihitung hanya posisi akhir hanger
+	        #FuncTag.Position := #FuncTag.Destination; //Dengan Catatan tiap kali crane ganti, hanger selected kereset.
+	        #FuncTag."Start Position" := #FuncTag.Position;
+	    END_IF;
+	    
+	END_REGION
+	
+	
+	REGION Ending Sequence
+	    // Supaya block nya bisa dipake lagi, ketika jml proses udah semua dan proses terakhir sudah dilakukan
+	    IF #FuncTag."Nomor Proses" = #FuncTag."Jml Proses" AND ("Positioning_DB"."hanger selected" = #FuncTag."Nomor Hanger" AND "Step Gerak"."Lepas step" = 3) THEN
+	        #FuncTag."Finish Process" := TRUE; //ini yang jadi marker buat popup HMI, sekaligus jd marker buat ambil data
+	    END_IF;
+	    
+	    //kalau HMI udah dipencet berarti clear, reset all
+	    IF #FuncTag.HMI_Finish = TRUE OR #FuncTag.HMI_Reset = TRUE THEN
+	        #FuncTag.Proses := 0; //Harus dikembangin ke arah HMI
+	        #FuncTag."Nomor Proses" := 0; //Dibalikin ke nol supaya reset
+	        #FuncTag.HMI_Ready := FALSE; //ntar diganti supaya datanya ditarik dulu sebelum bener2 "FINISH" di HMI nya
+	        #FuncTag.Checker_Ready := FALSE;
+	        #FuncTag.Time_Ready := FALSE;
+	        #FuncTag.Crane_Ready := FALSE;
+	        #FuncTag."Finish Process" := FALSE;
+	        #FuncTag.Timer_Reset := TRUE; //untuk reset timer di bawah
+	        
+	        
+	        //reset pengecekan penjadwalan
+	        FOR #"CNT_Reset Crane" := 0 TO 10 DO
+	            "Hanger Data"."Predict Crane"[#FuncTag."Nomor Hanger"].C_Ready[#"CNT_Reset Crane"] := FALSE;
+	            // Statement section FOR
+	        END_FOR;
+	        
+	        FOR #"CNT_Reset Tank" := 0 TO 6 DO
+	            "Hanger Data".Predict[#FuncTag."Nomor Hanger"]."NP Ready"[#"CNT_Reset Tank"] := FALSE;
+	            // Statement section FOR
+	        END_FOR;
+	        
+	        //Reset semua timer ketika Timer_Reset = TRUE -> ET nya udah gausah disimpen
+	        IF #FuncTag.Timer_Reset = TRUE THEN //ntar ke HMI aja nyambungnya
+	            FOR #counter := 0 TO 9 DO //Timer celup dari 0 sampe 9
+	                #FuncTag."Timer celup"[#counter] := T#0MS; //reset timer celup
+	                #FuncTag.Process_Start_Time[#counter] := 0;
+	                #FuncTag.Process_Stop_Time[#counter] := 0;
+	                #FuncTag.Setpoint[#counter] := T#0MS; //reset setpointnya
+	                RESET_TIMER(#FuncTag."IEC Timer Proses"[#counter]);
+	                ;
+	            END_FOR;
+	            FOR #counter := 0 TO 10 DO //reset yang predict crane
+	                "Hanger Data"."Predict Crane"[#FuncTag."Nomor Hanger"].Start[#counter] := 0;
+	                "Hanger Data"."Predict Crane"[#FuncTag."Nomor Hanger"].Stop[#counter] := 0;
+	            END_FOR;
+	            #FuncTag.Timer_Reset := FALSE; //false in lagi
+	        END_IF;
+	        
+	        //lalu rewrite HMI finish supaya bisa dipake lagi
+	        #FuncTag.HMI_Finish := FALSE;
+	        //Prediction ga di-reset karena sistemnya time-based, karena time selalu maju jd pasti memenuhi kondisi
+	    END_IF;
+	    
+	    //Kalau reset, rerun program tapi dengan proses 6 (proses resetting hanger)
+	    IF #FuncTag.HMI_Reset = TRUE THEN
+	        #FuncTag.Proses := 6; //routing reset
+	        #FuncTag.HMI_Ready := TRUE; //anggap ready
+	        #FuncTag.HMI_Reset := FALSE; //balikin lagi kondisi HMI reset
+	    END_IF;
+	END_REGION
+	
+	//Kode yang mengecek apakah proses Divert sudah selesai. Kalo udah selesai, loncat ke Skenario 1. Ditaro di akhir supaya FunctagDivert gak ke FALSE duluan
+	IF #FuncTag.Divert = TRUE THEN
+	    //cek apakah divert sudah selesai, melalui posisi si hanger.
+	    IF #FuncTag.Position = #FuncTag.Homebase AND "Step Gerak"."Lepas step" = 3 THEN
+	        //Loncat ke skenario 1
+	        #FuncTag.Divert := FALSE;
+	        #FuncTag.Ready := FALSE;
+	        #FuncTag.Checker_Ready := FALSE;
+	    END_IF;
+	END_IF;	
+END_FUNCTION
