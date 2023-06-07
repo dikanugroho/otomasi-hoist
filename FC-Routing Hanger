@@ -1,0 +1,177 @@
+FUNCTION "Routing Hanger" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      homebase : Int;
+   END_VAR
+
+   VAR_OUTPUT 
+      destination : Int;
+      "jml proses" : Int;
+      "next destination" : Int;
+   END_VAR
+
+   VAR_IN_OUT 
+      proses : Int;
+      "nomor proses" : Int;
+   END_VAR
+
+   VAR_TEMP 
+      temps : Bool;
+   END_VAR
+
+
+BEGIN
+	CASE #proses OF
+	    1:  // CBP-IP
+	        #"jml proses" := 5;
+	        CASE #"nomor proses" OF
+	            0:  // agar logic nomor proses berjalan (logic cek kekosongan)
+	                #destination := 4;
+	                #"next destination" := 4;
+	            1:  // tangki 1
+	                #destination := 4;
+	                #"next destination" := 5; //penanda untuk ngecek readiness pada tangki berikutnya
+	            2:  // tangki 2
+	                #destination := 5;
+	                #"next destination" := 6;
+	            3:  // tangki 3
+	                #destination := 6;
+	                #"next destination" := 5;
+	            4:  // tangki 2
+	                #destination := 5;
+	                #"next destination" := #homebase; //pulang
+	            5: //pulang
+	                #destination := #homebase; //HARUSNYA HOMEBASE
+	                #"next destination" := #homebase;
+	            ELSE  // Statement section ELSE
+	                #proses := 0 //kalau nomor proses ditambah lagi, proses ke 0, berhenti 
+	                ;
+	        END_CASE;
+	        ;
+	        
+	    2:  // CBP-ADS
+	        #"jml proses" := 3;
+	        CASE #"nomor proses" OF
+	            0:  // agar logic nomor proses berjalan (logic cek kekosongan)
+	                #destination := 4;
+	                #"next destination" := 4;
+	            1:  // tangki 1
+	                #destination := 4;
+	                #"next destination" := 5; //penanda untuk ngecek readiness pada tangki berikutnya
+	            2:  // tangki 2
+	                #destination := 5;
+	                #"next destination" := #homebase; //pulang
+	            3:  // PULANG
+	                #destination := #homebase; //Lokasi pulang beda2 tergantung hanger nomor berapa
+	                #"next destination" := #homebase;
+	            ELSE  // Statement section ELSE
+	                ;
+	        END_CASE;
+	        ;
+	    3:  // CCC
+	        #"jml proses" := 7;
+	        CASE #"nomor proses" OF
+	            0:  // agar logic nomor proses berjalan (logic cek kekosongan)
+	                #destination := 4;
+	                #"next destination" := 4;
+	            1:  // tangki 1
+	                #destination := 4;
+	                #"next destination" := 5; //penanda untuk ngecek readiness pada tangki berikutnya
+	            2:  // tangki 2
+	                #destination := 5;
+	                #"next destination" := 6;
+	            3:  // tangki 3
+	                #destination := 6;
+	                #"next destination" := 5;
+	            4:  // tangki 2
+	                #destination := 5;
+	                #"next destination" := 7;
+	            5:  // tangki 4
+	                #destination := 7;
+	                #"next destination" := 5;
+	            6:  // tangki 2
+	                #destination := 5;
+	                #"next destination" := #homebase; //pulang
+	            7: //pulang
+	                #destination := #homebase; //HARUSNYA HOMEBASE
+	                #"next destination" := #homebase;
+	            ELSE  // Statement section ELSE
+	                #proses := 0 //kalau nomor proses ditambah lagi, proses ke 0, berhenti 
+	                ;
+	        END_CASE;
+	    4:  // CAA
+	    #"jml proses" := 7;
+	    CASE #"nomor proses" OF
+	        0:  // agar logic nomor proses berjalan (logic cek kekosongan)
+	            #destination := 4;
+	            #"next destination" := 4;
+	        1:  // tangki 1
+	            #destination := 4;
+	            #"next destination" := 5; //penanda untuk ngecek readiness pada tangki berikutnya
+	        2:  // tangki 2
+	            #destination := 5;
+	            #"next destination" := 6;
+	        3:  // tangki 3
+	            #destination := 6;
+	            #"next destination" := 5;
+	        4:  // tangki 2
+	            #destination := 5;
+	            #"next destination" := 8;
+	        5:  // tangki 4
+	            #destination := 8;
+	            #"next destination" := 5;
+	        6:  // tangki 2
+	            #destination := 5;
+	            #"next destination" := #homebase; //pulang
+	        7: //pulang
+	            #destination := #homebase; //HARUSNYA HOMEBASE
+	            #"next destination" := #homebase;
+	        ELSE  // Statement section ELSE
+	            #proses := 0 //kalau nomor proses ditambah lagi, proses ke 0, berhenti 
+	            ;
+	    END_CASE;
+	    5: //SAA
+	    #"jml proses" := 5;
+	    CASE #"nomor proses" OF
+	        0:  // agar logic nomor proses berjalan (logic cek kekosongan)
+	            #destination := 4;
+	            #"next destination" := 4;
+	        1:  // tangki 1
+	            #destination := 4;
+	            #"next destination" := 5; //penanda untuk ngecek readiness pada tangki berikutnya
+	        2:  // tangki 2
+	            #destination := 5;
+	            #"next destination" := 6;
+	        3:  // tangki 3
+	            #destination := 6;
+	            #"next destination" := 5;
+	        4:  // tangki 2
+	            #destination := 5;
+	            #"next destination" := #homebase; //pulang
+	        5: //pulang
+	            #destination := #homebase; //HARUSNYA HOMEBASE
+	            #"next destination" := #homebase;
+	        ELSE  // Statement section ELSE
+	            #proses := 0 //kalau nomor proses ditambah lagi, proses ke 0, berhenti 
+	            ;
+	    END_CASE;
+	    ;
+	6: //Reset
+	    #"jml proses" := 1;
+	    CASE #"nomor proses" OF
+	        0:  // agar logic nomor proses berjalan (logic cek kekosongan)
+	            #destination := #homebase;
+	            #"next destination" := #homebase;
+	        1: //pulangin
+	            #destination := #homebase;
+	            #"next destination" := #homebase;
+	        ELSE  // Statement section ELSE
+	            #proses := 0 //kalau nomor proses ditambah lagi, proses ke 0, berhenti (kayanya harusnya no proses deh). Belum bikin end sequenc
+	            ;
+	    END_CASE;
+	    ELSE  // Statement section ELSE
+	        ;
+	END_CASE;
+	
+END_FUNCTION
