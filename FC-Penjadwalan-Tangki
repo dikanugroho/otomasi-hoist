@@ -1,0 +1,162 @@
+FUNCTION "Penjadwalan TANGKI" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      "nomor hanger" : Int;
+      "jml proses" : Int;
+   END_VAR
+
+   VAR_OUTPUT 
+      Ready : Bool;
+   END_VAR
+
+   VAR_IN_OUT 
+      FuncTag : "Hanger";
+   END_VAR
+
+   VAR_TEMP 
+      h1 : Int;
+      "CNT_Nomor Proses" : Int;
+      "CNT_Hasil Akhir" : Int;
+      NP_Ready : Array[0..6] of Bool;
+      "Cek Ready" : Int;
+      "counter prediksi" : Int;
+      "modifier pertama" : Int;
+      "modifier start" : Int;
+      "conv setpoint" : DInt;
+   END_VAR
+
+
+BEGIN
+	//Algoritma Penentuan TIME_Ready
+	//
+	//pilih pembanding
+	CASE #"nomor hanger" OF
+	    1:
+	        #h1 := 2;
+	        ;
+	    2:
+	        #h1 := 1;
+	        ;
+	    ELSE  // Statement section ELSE
+	        ;
+	END_CASE;
+	
+	REGION Prediksi Waktu Mulai dan Selesai
+	    //bentuknya prediksi waktu kedepan, dirun satu kali aja sebelum hanger TIME_Ready
+	    //Tidak di-run jika TIME_Ready sudah OK
+	    IF (#FuncTag.Time_Ready = FALSE OR #FuncTag.Crane_Ready = FALSE) AND #FuncTag.HMI_Ready = TRUE THEN //Time Ready dibikin TRUE kalo pake sistem baru
+	        //Ambil waktu saat ini sebagai startpoint dan stoppoints (menjaga logic)
+	        "Get Local Time"(#FuncTag.Process_Start_Time[0]);
+	        "Get Local Time"(#FuncTag.Process_Stop_Time[0]);
+	        //Ada -1 soalnya jumlah proses ada proses pulang ke homebase
+	        FOR #"counter prediksi" := 0 TO (#FuncTag."Jml Proses" - 1) DO
+	            
+	            //Waktu mulai [1] = Start Time saat ini (disimpen di waktu mulai [0] + Lama perpindahan sampe nyelup
+	            //Waktu Mulai [i] =  Waktu selesai [i-1] + Lama perpindahan sampe nyelup, kecuali ngangkat
+	            //waktu setpoint diconvert menjadi seconds dalam INT
+	            "Time Converter to seconds"("time input" := #FuncTag.Setpoint[#"counter prediksi"],
+	                                        "time output" => #"conv setpoint");
+	            #"modifier pertama" := (2 * "Time Param"."Avg Moving_Int") + ("Time Param".Naik_Int) + (2 * "Time Param".Turun_Int);
+	            #"modifier start" := "Time Param"."Avg Moving_Int" + "Time Param".Naik_Int + "Time Param".Turun_Int;
+	            IF #"counter prediksi" = 0 THEN
+	                "Get Local Time"(#FuncTag.Process_Start_Time[0]);
+	                "Get Local Time"(#FuncTag.Process_Stop_Time[0]);
+	            ELSIF #"counter prediksi" = 1 THEN
+	                #FuncTag.Process_Start_Time[#"counter prediksi"] := #FuncTag.Process_Stop_Time[#"counter prediksi" - 1] + #"modifier pertama";
+	            ELSE
+	                #FuncTag.Process_Start_Time[#"counter prediksi"] := #FuncTag.Process_Stop_Time[#"counter prediksi" - 1] + #"modifier start";
+	            END_IF;
+	            //Waktu selesai [i] = Waktu Mulai [i] + Setpoint  + Possibility crane sibuk 
+	            #FuncTag.Process_Stop_Time[#"counter prediksi"] := #FuncTag.Process_Start_Time[#"counter prediksi"] + #"conv setpoint";
+	        END_FOR;
+	        
+	        "Convert INT To TIME"("INT Input" := #FuncTag.Process_Start_Time[0],
+	                              "TIME Output" => #FuncTag.Start_ToD);
+	        "Convert INT To TIME"("INT Input" := #FuncTag.Process_Stop_Time[#FuncTag."Jml Proses"],
+	                              "TIME Output" => #FuncTag.Stop_ToD);
+	    END_IF;
+	END_REGION
+	
+	//setiap nomor proses dicek
+	//proses-n siap dilakukan kalo tangkinya lagi ga kepake (start/stop time = 0) atau bisa diselipin
+	
+	//Pengecekan baru sistem 2 hanger, 3 hanger belom
+	
+	//cek untuk setiap nomor proses karena jumlah tangki yang dimasukin sebesar jml proses
+	FOR #"CNT_Nomor Proses" := 1 TO #"jml proses" - 1 DO //Hanya cek sampe nomor proses max nya aja
+	    
+	    //untuk proses ganjil yang tangkinya cuma dipake sekali
+	    IF #"CNT_Nomor Proses" MOD 2 <> 0 THEN
+	        IF "Hanger Data".Hanger[#h1].Process_Stop_Time[#"CNT_Nomor Proses"] = 0 THEN //STOP = 0 berarti gaada proses
+	            "Hanger Data".Predict[#"nomor hanger"]."NP Ready"[#"CNT_Nomor Proses"] := TRUE;
+	        ELSIF "Hanger Data".Hanger[#h1].Process_Start_Time[#"CNT_Nomor Proses"] > "Hanger Data".Hanger[#"nomor hanger"].Process_Stop_Time[#"CNT_Nomor Proses"] = TRUE
+	            OR "Hanger Data".Hanger[#"nomor hanger"].Process_Start_Time[#"CNT_Nomor Proses"] > "Hanger Data".Hanger[#h1].Process_Stop_Time[#"CNT_Nomor Proses"] = TRUE THEN
+	            "Hanger Data".Predict[#"nomor hanger"]."NP Ready"[#"CNT_Nomor Proses"] := TRUE;
+	        ELSE
+	            "Hanger Data".Predict[#"nomor hanger"]."NP Ready"[#"CNT_Nomor Proses"] := FALSE;
+	        END_IF;
+	        
+	    //untuk proses genap
+	    ELSIF #"CNT_Nomor Proses" MOD 2 = 0 THEN 
+	        IF "Hanger Data".Hanger[#h1].Process_Stop_Time[#"CNT_Nomor Proses"] = 0 THEN //kalo 0 berarti gaada prosesnya
+	            "Hanger Data".Predict[#"nomor hanger"]."NP Ready"[#"CNT_Nomor Proses"] := TRUE;
+	            //pertama cek dengan CNT Nomor Proses
+	        ELSIF ("Hanger Data".Hanger[#h1].Process_Start_Time[#"CNT_Nomor Proses"] >= "Hanger Data".Hanger[#"nomor hanger"].Process_Stop_Time[#"CNT_Nomor Proses"] = TRUE
+	            OR "Hanger Data".Hanger[#"nomor hanger"].Process_Start_Time[#"CNT_Nomor Proses"] >= "Hanger Data".Hanger[#h1].Process_Stop_Time[#"CNT_Nomor Proses"] = TRUE) THEN
+	            
+	            //lalu dengan nomor proses lain. Intinya start h < start < stop h dan start h < stop > stop h = FALSE
+	            CASE "Hanger Data".Hanger[#h1]."Jml Proses" OF //beda nomor proses = beda IF supaya ga kena yang nol
+	                3:  //2 doang
+	                    IF ("Hanger Data".Hanger[#h1].Process_Start_Time[2] >= "Hanger Data".Hanger[#"nomor hanger"].Process_Stop_Time[#"CNT_Nomor Proses"]) = TRUE
+	                        OR ("Hanger Data".Hanger[#"nomor hanger"].Process_Start_Time[#"CNT_Nomor Proses"] >= "Hanger Data".Hanger[#h1].Process_Stop_Time[2]) = TRUE THEN
+	                        "Hanger Data".Predict[#"nomor hanger"]."NP Ready"[#"CNT_Nomor Proses"] := TRUE;
+	                    ELSE
+	                        "Hanger Data".Predict[#"nomor hanger"]."NP Ready"[#"CNT_Nomor Proses"] := FALSE;
+	                    END_IF;
+	                5: //2 4
+	                    IF ("Hanger Data".Hanger[#h1].Process_Start_Time[2] >= "Hanger Data".Hanger[#"nomor hanger"].Process_Stop_Time[#"CNT_Nomor Proses"]) = TRUE
+	                        OR ("Hanger Data".Hanger[#"nomor hanger"].Process_Start_Time[#"CNT_Nomor Proses"] >= "Hanger Data".Hanger[#h1].Process_Stop_Time[4]) = TRUE
+	                        OR ("Hanger Data".Hanger[#h1].Process_Stop_Time[2] <= "Hanger Data".Hanger[#"nomor hanger"].Process_Start_Time[#"CNT_Nomor Proses"] = TRUE AND "Hanger Data".Hanger[#h1].Process_Start_Time[4] >= "Hanger Data".Hanger[#"nomor hanger"].Process_Stop_Time[#"CNT_Nomor Proses"] = TRUE) THEN
+	                        "Hanger Data".Predict[#"nomor hanger"]."NP Ready"[#"CNT_Nomor Proses"] := TRUE;
+	                    ELSE
+	                        "Hanger Data".Predict[#"nomor hanger"]."NP Ready"[#"CNT_Nomor Proses"] := FALSE;
+	                    END_IF;
+	                    
+	                7:  //2 4 6
+	                    IF ("Hanger Data".Hanger[#h1].Process_Start_Time[2] >= "Hanger Data".Hanger[#"nomor hanger"].Process_Stop_Time[#"CNT_Nomor Proses"]) = TRUE
+	                        OR ("Hanger Data".Hanger[#"nomor hanger"].Process_Start_Time[#"CNT_Nomor Proses"] >= "Hanger Data".Hanger[#h1].Process_Stop_Time[6]) = TRUE
+	                        OR ("Hanger Data".Hanger[#h1].Process_Stop_Time[2] <= "Hanger Data".Hanger[#"nomor hanger"].Process_Start_Time[#"CNT_Nomor Proses"]) = TRUE AND ("Hanger Data".Hanger[#h1].Process_Start_Time[4] >= "Hanger Data".Hanger[#"nomor hanger"].Process_Stop_Time[#"CNT_Nomor Proses"]) = TRUE
+	                        OR ("Hanger Data".Hanger[#h1].Process_Stop_Time[4] <= "Hanger Data".Hanger[#"nomor hanger"].Process_Start_Time[#"CNT_Nomor Proses"] = TRUE AND "Hanger Data".Hanger[#h1].Process_Start_Time[6] >= "Hanger Data".Hanger[#"nomor hanger"].Process_Stop_Time[#"CNT_Nomor Proses"] = TRUE) THEN
+	                        
+	                        "Hanger Data".Predict[#"nomor hanger"]."NP Ready"[#"CNT_Nomor Proses"] := TRUE;
+	                    ELSE
+	                        
+	                        "Hanger Data".Predict[#"nomor hanger"]."NP Ready"[#"CNT_Nomor Proses"] := FALSE;
+	                    END_IF;
+	                    ;
+	                ELSE //case
+	                    ;
+	            END_CASE;
+	        END_IF;
+	    END_IF;
+	END_FOR;
+	
+	//cek hasil akhir, kecuali untuk proses RES
+	IF "Hanger Data".Hanger[#"nomor hanger"].Proses = 6 THEN
+	    #Ready := TRUE;
+	ELSE //selain proses res
+	    FOR #"CNT_Hasil Akhir" := 1 TO #"jml proses" - 1 DO //Hanya cek sampe nomor proses max nya aja
+	        IF "Hanger Data".Predict[#"nomor hanger"]."NP Ready"[#"CNT_Hasil Akhir"] = TRUE THEN
+	            #"Cek Ready" := #"Cek Ready" + 1;
+	            IF #"Cek Ready" = #"jml proses" - 1 THEN
+	                #Ready := TRUE;
+	            END_IF;
+	        ELSE
+	            #Ready := FALSE;
+	            EXIT;
+	        END_IF;
+	    END_FOR;
+	END_IF;
+	        
+END_FUNCTION
