@@ -1,0 +1,144 @@
+FUNCTION "Penjadwalan CRANE" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      nh : Int;   // nomor hanger
+   END_VAR
+
+   VAR_OUTPUT 
+      Ready : Bool;
+   END_VAR
+
+   VAR_TEMP 
+      CNT_NP : Int;
+      CNT_Pred : Int;
+      CNT_Pembanding : Int;
+      CNT_Ready : Int;
+      "CNT_Hasil Akhir" : Int;
+      "CNT Reset" : Int;
+      CNT : Int;
+      "jml proses_p" : Int;
+      h1 : Int;
+      "jml proses" : Int;
+      starttime : DInt;
+      pembanding_start : DInt;
+      stoptime : DInt;
+      pembanding_stop : DInt;
+      "modifier start" : Int;
+      "modifier stop" : Int;
+      "modifier pertama" : Int;
+      "local time" : DInt;
+      "Cek Ready" : Int;
+   END_VAR
+
+   VAR CONSTANT 
+      Moving : Int := 15;
+      Ambil : Int := 26;
+      Lepas : Int := 26;
+   END_VAR
+
+
+BEGIN
+	//
+	//pilih pembanding
+	CASE #nh OF
+	    1:
+	        #h1 := 2;
+	        ;
+	    2:
+	        #h1 := 1;
+	        ;
+	    ELSE  // Statement section ELSE
+	        ;
+	END_CASE;
+	
+	//Deklarasi variabel
+	#CNT := "Hanger Data".Hanger[#nh]."Nomor Proses";
+	#"jml proses_p" := "Hanger Data".Hanger[#h1]."Jml Proses";
+	#"jml proses" := "Hanger Data".Hanger[#nh]."Jml Proses";
+	
+	#"modifier start" := ("Time Param"."Avg Moving_Int" + "Time Param".Turun_Int); //waktu yang dipake buat moving dan turun
+	#"modifier stop" := "Time Param".Naik_Int; //buat naik lagi setelah stop
+	#"modifier pertama" := "Time Param"."Avg Moving_Int" + (2 * "Time Param".Naik_Int) + "Time Param"."Avg Moving_Int" + (2 * "Time Param".Turun_Int);
+	
+	"Get Local Time"(#"local time"); //get local time, save to #local time
+	
+	//FOR untuk write data crane usage. Ambil dari start stop aja. Lihat buku catatan buat grafik gantt nya
+	FOR #CNT_NP := 1 TO #"jml proses" DO //Aakan ada pergerakan crane sebanyak jml proses
+	    
+	    //Start crane ketika waktu start prediksi dikurangi  dengan modifier
+	    IF #CNT_NP = 1 THEN //kalo starter beda di bagian start nya, karena gaada pengurangan modifier
+	        "Hanger Data"."Predict Crane"[#nh].Start[#CNT_NP] := #"local time";
+	        "Hanger Data"."Predict Crane"[#nh].Stop[#CNT_NP] := "Hanger Data"."Predict Crane"[#nh].Start[#CNT_NP] + #"modifier pertama";
+	    ELSE  //kondisi lainnya
+	        "Hanger Data"."Predict Crane"[#nh].Start[#CNT_NP] := "Hanger Data".Hanger[#nh].Process_Stop_Time[#CNT_NP - 1] - #"modifier start";
+	        "Hanger Data"."Predict Crane"[#nh].Stop[#CNT_NP] := "Hanger Data"."Predict Crane"[#nh].Start[#CNT_NP] + #"modifier pertama";
+	    END_IF;
+	END_FOR;
+	
+	//Add keterangan untuk informasi kapan proses mulai dan selesai
+	    //call function
+	    "Convert INT To TIME"("INT Input" := "Hanger Data"."Predict Crane"[#nh].Start[1],
+	                          "TIME Output" => "Hanger Data".Hanger[#nh].Start_ToD);
+	    "Convert INT To TIME"("INT Input" := "Hanger Data"."Predict Crane"[#nh].Stop[#"jml proses"],
+	                          "TIME Output" => "Hanger Data".Hanger[#nh].Stop_ToD);
+	
+	//Cek waktu availability crane (nyontek dari kode cek time ready).
+	
+	//sampe 9 karena harus ngecek dengan semua possibility pergerakan crane
+	//Kalo hanger sebelah lagi gabut, langsung ready
+	IF "Hanger Data".Hanger[#h1].HMI_Ready = FALSE THEN
+	    #Ready := TRUE;
+	    
+	    //kalo hanger sebelah lagi ga gabut
+	ELSE
+	    FOR #CNT_Pred := 1 TO #"jml proses" DO //untuk setiap crane movement di Hanger ini
+	        
+	        //deklarasi start/stop time dari hanger
+	        #starttime := "Hanger Data"."Predict Crane"[#nh].Start[#CNT_Pred];
+	        #stoptime := "Hanger Data"."Predict Crane"[#nh].Stop[#CNT_Pred];
+	        
+	        FOR #CNT_Pembanding := 1 TO #"jml proses_p" DO //dicek dengan seluruh crane movement hanger sebelah, start maupun stop
+	            
+	            //deklarasi start/stop time hanger sebelah
+	            #pembanding_start := "Hanger Data"."Predict Crane"[#h1].Start[#CNT_Pembanding + 1]; //plus satu supaya pas ngecek nomor 9 ga error (kehabisan index array)
+	            #pembanding_stop := "Hanger Data"."Predict Crane"[#h1].Stop[#CNT_Pembanding]; 
+	            
+	            //start perbandingan antara Crane 1 dengan Crane 1-n dari hanger satunya
+	            //Kondisi : Cocok di sela-sela Crane satunya (diantara Crane 1 dan 2, 2 dan 3, dst).
+	            IF #CNT_Pembanding = #"jml proses_p" THEN //khusus untuk pembanding terakhir, karena stop nya infinit
+	                IF #starttime > #pembanding_stop THEN
+	                    "Hanger Data"."Predict Crane"[#nh].C_Ready[#CNT_Pred] := TRUE;
+	                    EXIT; //keluar dari loop, lanjut cek penggunaan crane berikutnya;
+	                ELSE
+	                    "Hanger Data"."Predict Crane"[#nh].C_Ready[#CNT_Pred] := FALSE;
+	                    ; //Lanjut cek CNT Pembanding berikutnya
+	                END_IF;
+	            ELSIF #CNT_Pembanding < #"jml proses_p" THEN //untuk pembanding yang lain
+	                IF #starttime > #pembanding_stop AND #stoptime < #pembanding_start THEN
+	                    "Hanger Data"."Predict Crane"[#nh].C_Ready[#CNT_Pred] := TRUE;
+	                    EXIT; //keluar dari loop, lanjut cek penggunaan crane berikutnya
+	                ELSE
+	                    "Hanger Data"."Predict Crane"[#nh].C_Ready[#CNT_Pred] := FALSE;
+	                    ; //Lanjut cek CNT Pembanding berikutnya
+	                END_IF;
+	            END_IF;
+	        END_FOR;
+	    END_FOR;
+	    
+	    FOR #"CNT_Hasil Akhir" := 1 TO #"jml proses" DO //Hanya cek sampe nomor proses max nya aja
+	        IF "Hanger Data"."Predict Crane"[#nh].C_Ready[#"CNT_Hasil Akhir"] = TRUE THEN
+	            #"Cek Ready" := #"Cek Ready" + 1;
+	            IF #"Cek Ready" = #"jml proses"  THEN
+	                #Ready := TRUE;
+	                EXIT;
+	            END_IF;
+	        ELSE
+	            #Ready := FALSE;
+	            EXIT;
+	        END_IF;
+	    END_FOR;
+	    
+	END_IF; //Buat IF HMI ready sebelah = FALSE
+	
+END_FUNCTION
