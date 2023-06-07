@@ -1,0 +1,35 @@
+FUNCTION "Hard Reset DB Positioning dan Step Gerak" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+
+BEGIN
+	//Reset positioning DB. Belum menemukan cara untuk overwrite satu DB sekaligus
+	"Positioning_DB".counter := 0;
+	"Positioning_DB".counter2 := 0;
+	"Positioning_DB"."current pos" := 1;
+	"Positioning_DB".destination := 0;
+	"Positioning_DB".from := 0;
+	"Positioning_DB"."hanger selected" := 0;
+	"Positioning_DB".IDLE := FALSE;
+	"Positioning_DB".Repositioning := 0;
+	
+	//Reset Step gerak
+	"Step Gerak"."Positioning step" := 0;
+	"Step Gerak"."Pindah 1" := FALSE;
+	"Step Gerak".Ambil := FALSE;
+	"Step Gerak"."Pindah 2" := FALSE;
+	"Step Gerak".Lepas := FALSE;
+	
+	"Step Gerak"."Ambil step" := 0;
+	"Step Gerak"."Belok kiri" := FALSE;
+	"Step Gerak".Turun := FALSE;
+	"Step Gerak"."Belok kanan" := FALSE;
+	"Step Gerak".Naik := FALSE;
+	"Step Gerak"."Lepas step" := 0;
+	
+	"Step Gerak".Go := FALSE;
+	"Step Gerak".Reposition := FALSE;
+	"Step Gerak".Take := FALSE;
+	"Step Gerak".Release := FALSE;
+	
+END_FUNCTION
