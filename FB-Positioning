@@ -1,0 +1,139 @@
+FUNCTION_BLOCK "Positioning"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_OUTPUT 
+      destination : Int;
+      from : Int;
+      Repositioning : Int;
+      IDLE : Bool;
+   END_VAR
+
+   VAR_IN_OUT 
+      "current pos" : Int;
+      "hanger selected" : Int;
+   END_VAR
+
+   VAR 
+      "counter" : Int;
+      counter2 : Int;
+   END_VAR
+
+   VAR_TEMP 
+      run : Bool;
+      stoptime : DInt;
+      np : Int;   // nomor proses
+      hangerpos : Int;
+      hs_temp : Int;   // buat rencana tangki 2 priority
+      from_temp : Int;   // buat rencana tangki 2 priority
+      localtime : DInt;
+   END_VAR
+
+
+BEGIN
+	REGION CRANE POSITION
+	//Mencari tahu posisi crane berdasarkan prox yang menyala
+	    IF "prox_ujung_kanan" = TRUE THEN
+	        #"current pos" := 1;
+	    END_IF;
+	    
+	    IF "prox_hanger_2" = TRUE THEN
+	        #"current pos" := 2;
+	    END_IF;
+	    
+	    IF "prox_hanger_1" = TRUE THEN
+	        #"current pos" := 3;
+	    END_IF;
+	    
+	    IF "prox_tangki_1" = TRUE THEN
+	        #"current pos" := 4;
+	    END_IF;
+	    
+	    IF "prox_tangki_2" = TRUE THEN
+	        #"current pos" := 5;
+	    END_IF;
+	    
+	    IF "prox_tangki_3" = TRUE THEN
+	        #"current pos" := 6;
+	    END_IF;
+	    
+	    IF "prox_tangki_4" = TRUE THEN
+	        #"current pos" := 7;
+	    END_IF;
+	    
+	    IF "prox_tangki_5" = TRUE THEN
+	        #"current pos" := 8;
+	    END_IF;
+	    
+	    IF "prox_ujung_kiri" = TRUE THEN
+	        #"current pos" := 9;
+	    END_IF;
+	END_REGION
+	
+	REGION HANGER SELECTOR
+	    // Memilih hanger yang akan digerakkan, akan start sekali saja. Kalau Crane tidak GO. GO sebagai filter.
+	    IF "Step Gerak".Go = FALSE THEN
+	        FOR #counter := 1 TO 2 DO //diganti kalo hanger nambah
+	            IF "Hanger Data".Hanger[#counter].Ready = TRUE THEN
+	                #"hanger selected" := #counter;
+	                #from := "Hanger Data".Hanger[#counter]."Start Position";
+	                "Step Gerak".Go := TRUE;
+	                EXIT;
+	            ELSE //Kalo gaada yang ready
+	                #"hanger selected" := 0;
+	                //Yaudah ga ngapa2in, paling loopnya ngulang terus.
+	            END_IF;
+	            ;
+	        END_FOR;
+	    END_IF;
+	        
+	        //Step Gerak.Go Akan FALSE sendiri ketika proses pemindahan sudah selesai (Cek Gerak FC4)
+	        //Perubahan nilai Hanger Selected hanya akan berubah kalo ada arahan gerak lagi.
+	        //Bind Variabel "Destination" dengan hanger terpilih jika sudah Go
+	        IF "Step Gerak".Go = TRUE THEN
+	            #destination := "Hanger Data".Hanger[#counter].Destination;
+	        END_IF;
+	
+	END_REGION
+	
+	REGION Adjust Position
+	    
+	    //Value hangerpos dipake buat mindahin crane
+	    #Repositioning := 5;
+	    IF #"current pos" <> #Repositioning AND "Step Gerak".Go = FALSE THEN //kalo beda berarti crane harus direpo
+	        "Step Gerak".Reposition := TRUE; //FC adjust akan nyala, tujuannya ke repositioning
+	    ELSE
+	        "Step Gerak".Reposition := FALSE;
+	    END_IF;
+	    
+	END_REGION
+	
+	//Cek apakah kedua hanger lagi gabut atau engga
+	IF "Hanger Data".Hanger[1].HMI_Ready = TRUE OR "Hanger Data".Hanger[2].HMI_Ready = TRUE THEN
+	    #IDLE := FALSE;
+	ELSE
+	    #IDLE := TRUE;
+	END_IF;
+	
+	REGION Algoritma Penentuan Take dan Release
+	    //Step gerak.Take
+	    #hs_temp := #"hanger selected";
+	    IF "Step Gerak".Go = TRUE THEN
+	        IF "Hanger Data".Hanger[#hs_temp]."Timer celup"["Hanger Data".Hanger[#hs_temp]."Nomor Proses"] >= "Hanger Data".Hanger[#hs_temp].Setpoint["Hanger Data".Hanger[#hs_temp]."Nomor Proses"] THEN
+	            "Step Gerak".Take := TRUE;
+	        ELSE
+	            ;
+	        END_IF;
+	        
+	        //Step gerak.Release
+	        "Get Local Time"(#localtime);
+	        
+	        IF "Hanger Data".Hanger[#hs_temp].Process_Start_Time["Hanger Data".Hanger[#hs_temp]."Nomor Proses"] - "Time Param".Turun_Int <= #localtime THEN
+	            "Step Gerak".Release := TRUE;
+	        ELSE
+	            "Step Gerak".Release := FALSE;
+	            ;
+	        END_IF;
+	    END_IF;
+	    
+	END_REGION
+END_FUNCTION_BLOCK 
